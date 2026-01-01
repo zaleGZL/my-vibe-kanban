@@ -339,7 +339,7 @@ impl GitCli {
 
     /// Commit staged changes with the given message.
     pub fn commit(&self, worktree_path: &Path, message: &str) -> Result<(), GitCliError> {
-        self.git(worktree_path, ["commit", "-m", message])?;
+        self.git(worktree_path, ["commit", "--no-verify", "-m", message])?;
         Ok(())
     }
     /// Fetch a branch to the given remote using native git authentication.
@@ -386,6 +386,27 @@ impl GitCli {
         ];
 
         match self.git_with_env(repo_path, args, &envs) {
+            Ok(_) => Ok(()),
+            Err(GitCliError::CommandFailed(msg)) => Err(self.classify_cli_error(msg)),
+            Err(err) => Err(err),
+        }
+    }
+
+    /// Push a refspec to the given remote with custom environment variables.
+    pub fn push_with_refspec(
+        &self,
+        repo_path: &Path,
+        remote_url: &str,
+        refspec: &str,
+        envs: &[(OsString, OsString)],
+    ) -> Result<(), GitCliError> {
+        let args = [
+            OsString::from("push"),
+            OsString::from(remote_url),
+            OsString::from(refspec),
+        ];
+
+        match self.git_with_env(repo_path, args, envs) {
             Ok(_) => Ok(()),
             Err(GitCliError::CommandFailed(msg)) => Err(self.classify_cli_error(msg)),
             Err(err) => Err(err),

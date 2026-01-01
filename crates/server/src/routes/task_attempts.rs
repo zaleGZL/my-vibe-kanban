@@ -521,7 +521,7 @@ pub async fn push_task_attempt_branch_with_add(
 
     match deployment
         .git()
-        .add_all_and_push_to_github(&worktree_path, &workspace.branch, false)
+        .add_all_and_push_to_github(&worktree_path, &workspace.branch)
     {
         Ok(_) => Ok(ResponseJson(ApiResponse::success(()))),
         Err(GitServiceError::GitCLI(GitCliError::PushRejected(_))) => Ok(ResponseJson(

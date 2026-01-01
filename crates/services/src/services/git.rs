@@ -1690,12 +1690,13 @@ impl GitService {
         Ok(())
     }
 
-    /// Stage all changes and push to GitHub (git add --all && git push)
+    /// Stage all changes and push to GitHub
+    /// - If no changes, return early
+    /// - If changes exist: git add --all && git commit --no-verify -m 'update' && git push --set-upstream origin <branch>
     pub fn add_all_and_push_to_github(
         &self,
         worktree_path: &Path,
         branch_name: &str,
-        force: bool,
     ) -> Result<(), GitServiceError> {
         let repo = Repository::open(worktree_path)?;
 
@@ -1709,14 +1710,35 @@ impl GitService {
 
         let git_cli = GitCli::new();
 
-        // First, add all changes
+        // Check if there are any changes
+        let has_changes = git_cli
+            .has_changes(worktree_path)
+            .map_err(|e| GitServiceError::InvalidRepository(format!("git status failed: {e}")))?;
+
+        // If no changes, return early (success, nothing to do)
+        if !has_changes {
+            tracing::debug!("No changes to commit, skipping push");
+            return Ok(());
+        }
+
+        // Add all changes
         if let Err(e) = git_cli.add_all(worktree_path) {
             tracing::error!("Git add --all failed: {}", e);
             return Err(GitServiceError::InvalidRepository(format!("git add failed: {e}")));
         }
 
-        // Then push
-        if let Err(e) = git_cli.push(worktree_path, remote_url, branch_name, force) {
+        // Commit changes
+        self.ensure_cli_commit_identity(worktree_path)?;
+        if let Err(e) = git_cli.commit(worktree_path, "update") {
+            tracing::error!("Git commit failed: {}", e);
+            return Err(GitServiceError::InvalidRepository(format!("git commit failed: {e}")));
+        }
+
+        // Push with set-upstream
+        let refspec = format!("refs/heads/{branch_name}:refs/heads/{branch_name}");
+        let envs = vec![(std::ffi::OsString::from("GIT_TERMINAL_PROMPT"), std::ffi::OsString::from("0"))];
+
+        if let Err(e) = git_cli.push_with_refspec(worktree_path, remote_url, &refspec, &envs) {
             tracing::error!("Push to GitHub failed: {}", e);
             return Err(e.into());
         }
