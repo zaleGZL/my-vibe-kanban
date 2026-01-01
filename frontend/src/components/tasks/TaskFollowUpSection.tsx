@@ -6,8 +6,6 @@ import {
   Clock,
   X,
   Paperclip,
-  Terminal,
-  MessageSquare,
   ArrowUpFromLine,
   Copy,
   Check,
@@ -15,12 +13,6 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import {
   Tooltip,
   TooltipContent,
@@ -63,8 +55,6 @@ import { useScratch } from '@/hooks/useScratch';
 import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
 import { useQueueStatus } from '@/hooks/useQueueStatus';
 import { imagesApi, attemptsApi } from '@/lib/api';
-import { GitHubCommentsDialog } from '@/components/dialogs/tasks/GitHubCommentsDialog';
-import type { NormalizedComment } from '@/components/ui/wysiwyg/nodes/github-comment-node';
 import type { Session } from 'shared/types';
 
 interface TaskFollowUpSectionProps {
@@ -439,26 +429,6 @@ export function TaskFollowUpSection({
   ]);
   const isEditable = !isRetryActive && !hasPendingApproval;
 
-  const hasAnyScript = true;
-
-  const handleRunSetupScript = useCallback(async () => {
-    if (!workspaceId || isAttemptRunning) return;
-    try {
-      await attemptsApi.runSetupScript(workspaceId);
-    } catch (error) {
-      console.error('Failed to run setup script:', error);
-    }
-  }, [workspaceId, isAttemptRunning]);
-
-  const handleRunCleanupScript = useCallback(async () => {
-    if (!workspaceId || isAttemptRunning) return;
-    try {
-      await attemptsApi.runCleanupScript(workspaceId);
-    } catch (error) {
-      console.error('Failed to run cleanup script:', error);
-    }
-  }, [workspaceId, isAttemptRunning]);
-
   // Handler to queue the current message for execution after agent finishes
   const handleQueueMessage = useCallback(async () => {
     if (
@@ -595,57 +565,6 @@ export function TaskFollowUpSection({
     [handlePasteFiles]
   );
 
-  // Handler for GitHub comments insertion
-  const handleGitHubCommentClick = useCallback(async () => {
-    if (!workspaceId) return;
-    const repoId = getSelectedRepoId();
-    if (!repoId) return;
-
-    const result = await GitHubCommentsDialog.show({
-      attemptId: workspaceId,
-      repoId,
-    });
-    if (result.comments.length > 0) {
-      // Build markdown for all selected comments
-      const markdownBlocks = result.comments.map((comment) => {
-        const payload: NormalizedComment = {
-          id:
-            comment.comment_type === 'general'
-              ? comment.id
-              : comment.id.toString(),
-          comment_type: comment.comment_type,
-          author: comment.author,
-          body: comment.body,
-          created_at: comment.created_at,
-          url: comment.url,
-          // Include review-specific fields when available
-          ...(comment.comment_type === 'review' && {
-            path: comment.path,
-            line: comment.line != null ? Number(comment.line) : null,
-            diff_hunk: comment.diff_hunk,
-          }),
-        };
-        return '```gh-comment\n' + JSON.stringify(payload, null, 2) + '\n```';
-      });
-
-      const markdown = markdownBlocks.join('\n\n');
-
-      // Same pattern as image paste
-      if (isQueuedRef.current && queuedMessageRef.current) {
-        cancelQueueRef.current();
-        const base = queuedMessageRef.current.data.message;
-        const newMessage = base ? `${base}\n\n${markdown}` : markdown;
-        setLocalMessage(newMessage);
-        setFollowUpMessageRef.current(newMessage);
-      } else {
-        setLocalMessage((prev) => {
-          const newMessage = prev ? `${prev}\n\n${markdown}` : markdown;
-          setFollowUpMessageRef.current(newMessage);
-          return newMessage;
-        });
-      }
-    }
-  }, [workspaceId, getSelectedRepoId]);
 
   // Stable onChange handler for WYSIWYGEditor
   const handleEditorChange = useCallback(
