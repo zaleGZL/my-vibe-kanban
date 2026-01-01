@@ -11,6 +11,7 @@ import {
   ArrowUpFromLine,
   Copy,
   Check,
+  GitPullRequest,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -374,6 +375,30 @@ export function TaskFollowUpSection({
       console.error('Failed to get worktree path:', err);
     }
   }, [getSelectedRepoId, workspaceId, attemptBranch]);
+
+  // Copy merge command handler (push first, then copy merge command)
+  const [mergeCopied, setMergeCopied] = useState(false);
+  const [isPreparingMerge, setIsPreparingMerge] = useState(false);
+  const handleCopyMergeCommand = useCallback(async () => {
+    const repoId = getSelectedRepoId();
+    if (!repoId || !workspaceId || !attemptBranch) return;
+
+    setIsPreparingMerge(true);
+    try {
+      // First, push current changes
+      await pushWithAdd({ repo_id: repoId });
+
+      // Then copy the merge command
+      const mergeCommand = `git pull && git merge ${attemptBranch}`;
+      await navigator.clipboard.writeText(mergeCommand);
+      setMergeCopied(true);
+      setTimeout(() => setMergeCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to prepare merge command:', err);
+    } finally {
+      setIsPreparingMerge(false);
+    }
+  }, [getSelectedRepoId, workspaceId, attemptBranch, pushWithAdd]);
 
   // Separate logic for when textarea should be disabled vs when send button should be disabled
   const canTypeFollowUp = useMemo(() => {
@@ -823,7 +848,7 @@ export function TaskFollowUpSection({
           </Button>
 
           {/* GitHub Comments button */}
-          <Button
+          {/* <Button
             onClick={handleGitHubCommentClick}
             disabled={!isEditable}
             size="sm"
@@ -832,10 +857,10 @@ export function TaskFollowUpSection({
             aria-label="Insert GitHub comment"
           >
             <MessageSquare className="h-4 w-4" />
-          </Button>
+          </Button> */}
 
           {/* Scripts dropdown - only show if project has any scripts */}
-          {hasAnyScript && (
+          {/* {hasAnyScript && (
             <DropdownMenu>
               <TooltipProvider>
                 <Tooltip>
@@ -867,7 +892,7 @@ export function TaskFollowUpSection({
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-          )}
+          )} */}
 
           {/* Git push with add-all button */}
           <TooltipProvider>
@@ -893,7 +918,7 @@ export function TaskFollowUpSection({
               <TooltipContent side="bottom">
                 {pushSuccess
                   ? 'Pushed successfully!'
-                  : 'git add --all && git push'}
+                  : 'Git Push'}
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
@@ -918,6 +943,34 @@ export function TaskFollowUpSection({
               </TooltipTrigger>
               <TooltipContent side="bottom">
                 {copied ? 'Copied!' : 'Copy cd to worktree'}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+
+          {/* Copy merge command button */}
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  onClick={handleCopyMergeCommand}
+                  disabled={isAttemptRunning || isPreparingMerge || isPushingWithAdd}
+                  size="sm"
+                  variant="outline"
+                  aria-label="Copy merge command"
+                >
+                  {isPreparingMerge ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : mergeCopied ? (
+                    <Check className="h-4 w-4" />
+                  ) : (
+                    <GitPullRequest className="h-4 w-4" />
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                {mergeCopied
+                  ? 'Copied!'
+                  : 'Copy: git pull && git merge <branch>'}
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
