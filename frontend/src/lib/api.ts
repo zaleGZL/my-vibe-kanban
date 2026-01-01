@@ -626,6 +626,34 @@ export const attemptsApi = {
     return handleApiResponseAsResult<void, PushError>(response);
   },
 
+  pushWithAdd: async (
+    attemptId: string,
+    data: PushTaskAttemptRequest
+  ): Promise<Result<void, PushError>> => {
+    const response = await makeRequest(
+      `/api/task-attempts/${attemptId}/push-with-add`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }
+    );
+    return handleApiResponseAsResult<void, PushError>(response);
+  },
+
+  getWorktreePathFromGit: async (
+    attemptId: string,
+    data: { repo_id: string; branch: string }
+  ): Promise<{ path: string }> => {
+    const response = await makeRequest(
+      `/api/task-attempts/${attemptId}/worktree-path-from-git`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }
+    );
+    return handleApiResponse<{ path: string }>(response);
+  },
+
   rebase: async (
     attemptId: string,
     data: RebaseTaskAttemptRequest

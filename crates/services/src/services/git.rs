@@ -1690,6 +1690,54 @@ impl GitService {
         Ok(())
     }
 
+    /// Stage all changes and push to GitHub (git add --all && git push)
+    pub fn add_all_and_push_to_github(
+        &self,
+        worktree_path: &Path,
+        branch_name: &str,
+        force: bool,
+    ) -> Result<(), GitServiceError> {
+        let repo = Repository::open(worktree_path)?;
+
+        // Get the remote
+        let remote_name = self.default_remote_name(&repo);
+        let remote = repo.find_remote(&remote_name)?;
+
+        let remote_url = remote
+            .url()
+            .ok_or_else(|| GitServiceError::InvalidRepository("Remote has no URL".to_string()))?;
+
+        let git_cli = GitCli::new();
+
+        // First, add all changes
+        if let Err(e) = git_cli.add_all(worktree_path) {
+            tracing::error!("Git add --all failed: {}", e);
+            return Err(GitServiceError::InvalidRepository(format!("git add failed: {e}")));
+        }
+
+        // Then push
+        if let Err(e) = git_cli.push(worktree_path, remote_url, branch_name, force) {
+            tracing::error!("Push to GitHub failed: {}", e);
+            return Err(e.into());
+        }
+
+        let mut branch = Self::find_branch(&repo, branch_name)?;
+        if !branch.get().is_remote() {
+            if let Some(branch_target) = branch.get().target() {
+                let remote_ref = format!("refs/remotes/{remote_name}/{branch_name}");
+                repo.reference(
+                    &remote_ref,
+                    branch_target,
+                    true,
+                    "update remote tracking branch",
+                )?;
+            }
+            branch.set_upstream(Some(&format!("{remote_name}/{branch_name}")))?;
+        }
+
+        Ok(())
+    }
+
     /// Fetch from remote repository using native git authentication
     fn fetch_from_remote(
         &self,

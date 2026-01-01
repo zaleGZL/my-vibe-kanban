@@ -21,6 +21,9 @@
 
 ![](frontend/public/vibe-kanban-screenshot-overview.png)
 
+
+https://github.com/zaleGZL/my-vibe-kanban
+
 ## Overview
 
 AI coding agents are increasingly writing the world's code and human engineers now spend the majority of their time planning, reviewing, and orchestrating tasks. Vibe Kanban streamlines this process, enabling you to:

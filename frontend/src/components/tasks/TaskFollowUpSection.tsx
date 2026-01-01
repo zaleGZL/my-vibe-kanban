@@ -8,6 +8,9 @@ import {
   Paperclip,
   Terminal,
   MessageSquare,
+  ArrowUpFromLine,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -46,6 +49,7 @@ import { ClickedElementsBanner } from '@/components/tasks/ClickedElementsBanner'
 import WYSIWYGEditor from '@/components/ui/wysiwyg';
 import { useRetryUi } from '@/contexts/RetryUiContext';
 import { useFollowUpSend } from '@/hooks/useFollowUpSend';
+import { usePushWithAdd } from '@/hooks/usePushWithAdd';
 import { useVariant } from '@/hooks/useVariant';
 import type {
   DraftFollowUpData,
@@ -332,6 +336,44 @@ export function TaskFollowUpSection({
         // Scratch deletion is handled by the backend when the queued message is consumed
       },
     });
+
+  // Push with add-all handler
+  const [pushSuccess, setPushSuccess] = useState(false);
+  const { mutateAsync: pushWithAdd, isPending: isPushingWithAdd } = usePushWithAdd(
+    workspaceId,
+    () => {
+      setPushSuccess(true);
+      setTimeout(() => setPushSuccess(false), 2000);
+    },
+    (err) => {
+      console.error('Push with add failed:', err);
+    }
+  );
+
+  const handlePushWithAdd = useCallback(async () => {
+    const repoId = getSelectedRepoId();
+    if (!repoId) return;
+    await pushWithAdd({ repo_id: repoId });
+  }, [getSelectedRepoId, pushWithAdd]);
+
+  // Copy cd command handler
+  const [copied, setCopied] = useState(false);
+  const handleCopyCd = useCallback(async () => {
+    const repoId = getSelectedRepoId();
+    if (!repoId || !workspaceId) return;
+    try {
+      const result = await attemptsApi.getWorktreePathFromGit(workspaceId, {
+        repo_id: repoId,
+        branch: attemptBranch ?? '',
+      });
+      const cdCommand = `cd ${result.path}`;
+      await navigator.clipboard.writeText(cdCommand);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to get worktree path:', err);
+    }
+  }, [getSelectedRepoId, workspaceId, attemptBranch]);
 
   // Separate logic for when textarea should be disabled vs when send button should be disabled
   const canTypeFollowUp = useMemo(() => {
@@ -826,6 +868,59 @@ export function TaskFollowUpSection({
               </DropdownMenuContent>
             </DropdownMenu>
           )}
+
+          {/* Git push with add-all button */}
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  onClick={handlePushWithAdd}
+                  disabled={isPushingWithAdd || isAttemptRunning}
+                  size="sm"
+                  variant="outline"
+                  className={pushSuccess ? 'border-success text-success' : ''}
+                  aria-label="Push with git add --all"
+                >
+                  {isPushingWithAdd ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : pushSuccess ? (
+                    <Check className="h-4 w-4" />
+                  ) : (
+                    <ArrowUpFromLine className="h-4 w-4" />
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                {pushSuccess
+                  ? 'Pushed successfully!'
+                  : 'git add --all && git push'}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+
+          {/* Copy cd command button */}
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  onClick={handleCopyCd}
+                  disabled={isAttemptRunning}
+                  size="sm"
+                  variant="outline"
+                  aria-label="Copy cd command"
+                >
+                  {copied ? (
+                    <Check className="h-4 w-4" />
+                  ) : (
+                    <Copy className="h-4 w-4" />
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                {copied ? 'Copied!' : 'Copy cd to worktree'}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
 
           {isAttemptRunning ? (
             <div className="flex items-center gap-2">

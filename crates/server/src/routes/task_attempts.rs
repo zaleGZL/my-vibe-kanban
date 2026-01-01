@@ -493,6 +493,44 @@ pub async fn force_push_task_attempt_branch(
     Ok(ResponseJson(ApiResponse::success(())))
 }
 
+pub async fn push_task_attempt_branch_with_add(
+    Extension(workspace): Extension<Workspace>,
+    State(deployment): State<DeploymentImpl>,
+    Json(request): Json<PushTaskAttemptRequest>,
+) -> Result<ResponseJson<ApiResponse<(), PushError>>, ApiError> {
+    let pool = &deployment.db().pool;
+
+    let github_service = GitHubService::new()?;
+    github_service.check_token().await?;
+
+    let workspace_repo =
+        WorkspaceRepo::find_by_workspace_and_repo_id(pool, workspace.id, request.repo_id)
+            .await?
+            .ok_or(RepoError::NotFound)?;
+
+    let repo = Repo::find_by_id(pool, workspace_repo.repo_id)
+        .await?
+        .ok_or(RepoError::NotFound)?;
+
+    let container_ref = deployment
+        .container()
+        .ensure_container_exists(&workspace)
+        .await?;
+    let workspace_path = Path::new(&container_ref);
+    let worktree_path = workspace_path.join(&repo.name);
+
+    match deployment
+        .git()
+        .add_all_and_push_to_github(&worktree_path, &workspace.branch, false)
+    {
+        Ok(_) => Ok(ResponseJson(ApiResponse::success(()))),
+        Err(GitServiceError::GitCLI(GitCliError::PushRejected(_))) => Ok(ResponseJson(
+            ApiResponse::error_with_data(PushError::ForcePushRequired),
+        )),
+        Err(e) => Err(ApiError::GitService(e)),
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 #[ts(tag = "type", rename_all = "snake_case")]
@@ -1477,6 +1515,96 @@ pub async fn get_task_attempt_repos(
     Ok(ResponseJson(ApiResponse::success(repos)))
 }
 
+#[derive(Debug, Serialize, Deserialize, TS)]
+#[serde(tag = "type", rename_all = "snake_case")]
+#[ts(tag = "type", rename_all = "snake_case")]
+pub struct WorktreePathRequest {
+    pub repo_id: Uuid,
+}
+
+#[derive(Debug, Serialize, Deserialize, TS)]
+pub struct WorktreePathFromGitRequest {
+    pub repo_id: Uuid,
+    pub branch: String,
+}
+
+#[derive(Debug, Serialize, TS)]
+pub struct WorktreePathResponse {
+    pub path: String,
+}
+
+pub async fn get_worktree_path(
+    Extension(workspace): Extension<Workspace>,
+    State(deployment): State<DeploymentImpl>,
+    Json(request): Json<WorktreePathRequest>,
+) -> Result<ResponseJson<ApiResponse<WorktreePathResponse>>, ApiError> {
+    let pool = &deployment.db().pool;
+
+    let workspace_repo =
+        WorkspaceRepo::find_by_workspace_and_repo_id(pool, workspace.id, request.repo_id)
+            .await?
+            .ok_or(RepoError::NotFound)?;
+
+    let repo = Repo::find_by_id(pool, workspace_repo.repo_id)
+        .await?
+        .ok_or(RepoError::NotFound)?;
+
+    let container_ref = deployment
+        .container()
+        .ensure_container_exists(&workspace)
+        .await?;
+    let workspace_path = Path::new(&container_ref);
+    let worktree_path = workspace_path.join(&repo.name);
+
+    Ok(ResponseJson(ApiResponse::success(WorktreePathResponse {
+        path: worktree_path.to_string_lossy().to_string(),
+    })))
+}
+
+/// Get worktree path by running `git worktree list` from the local repo
+/// and finding the worktree that has the specified branch checked out
+pub async fn get_worktree_path_from_git(
+    Extension(workspace): Extension<Workspace>,
+    State(deployment): State<DeploymentImpl>,
+    Json(request): Json<WorktreePathFromGitRequest>,
+) -> Result<ResponseJson<ApiResponse<WorktreePathResponse>>, ApiError> {
+    let pool = &deployment.db().pool;
+
+    let workspace_repo =
+        WorkspaceRepo::find_by_workspace_and_repo_id(pool, workspace.id, request.repo_id)
+            .await?
+            .ok_or(RepoError::NotFound)?;
+
+    let repo = Repo::find_by_id(pool, workspace_repo.repo_id)
+        .await?
+        .ok_or(RepoError::NotFound)?;
+
+    // Get the local repo path (the main repo, not the worktree)
+    let local_repo_path = PathBuf::from(&repo.path);
+
+    // Run `git worktree list` to get all worktrees
+    let git = services::services::git::GitCli::new();
+    let worktrees = git
+        .list_worktrees(&local_repo_path)
+        .map_err(|e| ApiError::GitService(e.into()))?;
+
+    // Find the worktree with the matching branch
+    let worktree_path = worktrees
+        .iter()
+        .find(|wt| wt.branch.as_ref().map(|b| b == &request.branch).unwrap_or(false))
+        .map(|wt| wt.path.clone())
+        .ok_or_else(|| {
+            GitServiceError::InvalidRepository(format!(
+                "Worktree for branch '{}' not found",
+                request.branch
+            ))
+        })?;
+
+    Ok(ResponseJson(ApiResponse::success(WorktreePathResponse {
+        path: worktree_path,
+    })))
+}
+
 pub fn router(deployment: &DeploymentImpl) -> Router<DeploymentImpl> {
     let task_attempt_id_router = Router::new()
         .route("/", get(get_task_attempt))
@@ -1490,6 +1618,7 @@ pub fn router(deployment: &DeploymentImpl) -> Router<DeploymentImpl> {
         .route("/merge", post(merge_task_attempt))
         .route("/push", post(push_task_attempt_branch))
         .route("/push/force", post(force_push_task_attempt_branch))
+        .route("/push-with-add", post(push_task_attempt_branch_with_add))
         .route("/rebase", post(rebase_task_attempt))
         .route("/conflicts/abort", post(abort_conflicts_task_attempt))
         .route("/pr", post(pr::create_github_pr))
@@ -1501,6 +1630,8 @@ pub fn router(deployment: &DeploymentImpl) -> Router<DeploymentImpl> {
         .route("/change-target-branch", post(change_target_branch))
         .route("/rename-branch", post(rename_branch))
         .route("/repos", get(get_task_attempt_repos))
+        .route("/worktree-path", post(get_worktree_path))
+        .route("/worktree-path-from-git", post(get_worktree_path_from_git))
         .layer(from_fn_with_state(
             deployment.clone(),
             load_workspace_middleware,
